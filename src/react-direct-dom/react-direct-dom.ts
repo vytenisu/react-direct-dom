@@ -11,7 +11,7 @@ export const createRoot = (container: Element) => ({
   // TODO: implement unmounting
 });
 
-const generateKey = (index: number, namespace: string = "") =>
+const generateKey = (index: number | string, namespace: string = "") =>
   `${namespace}${KEY_SEPARATOR}${index}`;
 
 const DOM_DATA_KEY = "_reactDirectDom";
@@ -91,7 +91,8 @@ export interface RDDElementRenderInfo {
   render: (
     parentElement: Element,
     element: Element | null,
-    key: string
+    key: string,
+    insertBefore?: ChildNode
   ) => void;
 }
 
@@ -128,6 +129,8 @@ const runChildren = (
     namespace.match(SEPARATOR_COUNT_REGEXP) || []
   ).length;
 
+  console.log(childNodes.map((child) => getElementData(child).key));
+
   childNodes = childNodes.filter((childNode) => {
     const { key } = getElementData(childNode);
     const sameDepth =
@@ -155,7 +158,7 @@ const runChildren = (
     const key =
       typeof child === "string" || !child.key
         ? generateKey(index, namespace)
-        : child.key;
+        : generateKey(child.key, namespace);
 
     console.log("LOOKING FOR KEY: ", key, " AMONG ", childNodeKeys);
 
@@ -192,10 +195,14 @@ const runChildren = (
       console.log("DID NOT FIND");
       if (typeof child === "string") {
         const text = document.createTextNode(child);
-        element.appendChild(text);
+        if (childNodeMap[childNodeKeys[index]]) {
+          element.insertBefore(text, childNodeMap[childNodeKeys[index]]);
+        } else {
+          element.appendChild(text);
+        }
         setElementData(text, { key, props: {} });
       } else {
-        child.render(element, null, key);
+        child.render(element, null, key, childNodeMap[childNodeKeys[index]]);
       }
     }
   }
@@ -217,14 +224,20 @@ export const createElement = (
   props: RDDProps,
   ...children: RDDChild[]
 ): RDDElementRenderInfo => {
-  // FIXME: use some rare symbol but prevent it anywhere in string because it is used as namespace separator
-  if (props?.key && props?.key?.toString().startsWith("_")) {
-    throw new Error('RDD Element key may not start with "_"');
+  if (props?.key && props?.key?.includes(KEY_SEPARATOR)) {
+    throw new Error(
+      `RDD Element key may not contain symbol "${KEY_SEPARATOR}"`
+    );
   }
 
   return {
-    key: props?.key ? KEY_SEPARATOR + "_" + props.key : null,
-    render: (parentElement: Element, element: Element | null, key: string) => {
+    key: props?.key ? "_" + props.key : null,
+    render: (
+      parentElement: Element,
+      element: Element | null,
+      key: string,
+      insertBefore?: ChildNode
+    ) => {
       console.log({
         component,
         props,
@@ -275,7 +288,12 @@ export const createElement = (
           }
 
           setElementData(element, { props, key });
-          parentElement.appendChild(element);
+
+          if (insertBefore) {
+            parentElement.insertBefore(element, insertBefore);
+          } else {
+            parentElement.appendChild(element);
+          }
         }
 
         console.log("EXECUTING CHILDREN");

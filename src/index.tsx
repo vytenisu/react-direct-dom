@@ -5,6 +5,7 @@ const root = React.createRoot(document.getElementById("root") as HTMLElement);
 
 root.render(<App />);
 
-document.getElementById("first")?.setAttribute("data-hello", "world");
+// document.getElementById("first")?.setAttribute("data-hello", "world");
+console.log("-----------------------");
 
 root.render(<App2 />);
