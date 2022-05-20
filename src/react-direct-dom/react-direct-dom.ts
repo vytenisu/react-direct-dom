@@ -46,6 +46,10 @@ const domKeyToComponentKey = (key: string) => {
     return reversePropMap[key];
   }
 
+  if (key.startsWith("_")) {
+    return null;
+  }
+
   return key;
 };
 
@@ -70,6 +74,7 @@ const updateChangedElementProps = (element: Element, props: RDDProps) => {
     const mappedKey = domKeyToComponentKey(key);
 
     if (Object.is(props[mappedKey], undefined) || props[mappedKey] === null) {
+      console.log("Removing attribute: ", key);
       element.removeAttribute(key);
     }
   }
@@ -85,6 +90,10 @@ const updateChangedElementProps = (element: Element, props: RDDProps) => {
       }
     }
   }
+
+  const data = getElementData(element);
+  data.props = props;
+  setElementData(element, data);
 };
 
 export interface RDDElementRenderInfo {
@@ -203,11 +212,13 @@ const runChildren = (
       console.log("DID NOT FIND");
       if (typeof child === "string") {
         const text = document.createTextNode(child);
+
         if (childNodeMap[childNodeKeys[index]]) {
           element.insertBefore(text, childNodeMap[childNodeKeys[index]]);
         } else {
           element.appendChild(text);
         }
+
         setElementData(text, { key, props: {} });
       } else {
         child.render(element, null, key, childNodeMap[childNodeKeys[index]]);
@@ -273,12 +284,12 @@ export const createElement = (
             undefined,
             key
           );
-          // (content as RDDElementRenderInfo).render(parentElement, element, key);
         }
       } else if (typeof component === "string") {
         let childNodes: ChildNode[] = [];
 
         if (element) {
+          console.log("UPDATING PROPS");
           updateChangedElementProps(element, props);
           childNodes = Array.from(element.childNodes);
         } else {
@@ -305,7 +316,7 @@ export const createElement = (
           }
         }
 
-        console.log("EXECUTING CHILDREN");
+        console.log("RUNNING CHILDREN");
         runChildren(element, children, childNodes);
       }
     },
