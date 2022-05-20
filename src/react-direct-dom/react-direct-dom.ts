@@ -30,6 +30,7 @@ const getElementData = (element: Element | ChildNode): RDDElementData =>
 
 const setElementData = (element: Element | ChildNode, data: RDDElementData) => {
   (element as any)[DOM_DATA_KEY] = data;
+  (element as Element).setAttribute?.("data-key", data.key);
 };
 
 const propMap: { [key: string]: string } = {
@@ -88,6 +89,7 @@ const updateChangedElementProps = (element: Element, props: RDDProps) => {
 
 export interface RDDElementRenderInfo {
   key: string | null;
+  isComponent: boolean;
   render: (
     parentElement: Element,
     element: Element | null,
@@ -112,6 +114,10 @@ const runChildren = (
   childNodes?: ChildNode[],
   namespace: string = ""
 ) => {
+  if (namespace.length && !namespace.startsWith(KEY_SEPARATOR)) {
+    namespace = KEY_SEPARATOR + namespace;
+  }
+
   const debug = debugIndex++;
 
   console.log("START: ", debug);
@@ -162,7 +168,9 @@ const runChildren = (
 
     console.log("LOOKING FOR KEY: ", key, " AMONG ", childNodeKeys);
 
-    if (childNodeKeys[index] === key) {
+    const isComponent = (child as RDDElementRenderInfo)?.isComponent ?? false;
+
+    if (childNodeKeys[index] === key && !isComponent) {
       console.log("FOUND IN GOOD PLACE");
       foundNodes.push(childNodeMap[key]);
 
@@ -173,7 +181,7 @@ const runChildren = (
       } else {
         child.render(element, childNodeMap[key] as Element, key);
       }
-    } else if (childNodeMap[key]) {
+    } else if (childNodeMap[key] && !isComponent) {
       console.log("FOUND IN BAD PLACE");
       foundNodes.push(childNodeMap[key]);
 
@@ -232,6 +240,7 @@ export const createElement = (
 
   return {
     key: props?.key ? "_" + props.key : null,
+    isComponent: typeof component === "function",
     render: (
       parentElement: Element,
       element: Element | null,
