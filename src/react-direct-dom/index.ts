@@ -301,6 +301,8 @@ export const createElement = (
           );
         }
       } else if (typeof component === "string") {
+        // TODO: if props are same - avoid rendering
+
         let childNodes: ChildNode[] = [];
 
         if (element) {
