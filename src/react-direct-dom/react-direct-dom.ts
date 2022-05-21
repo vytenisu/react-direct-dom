@@ -29,8 +29,14 @@ const getElementData = (element: Element | ChildNode): RDDElementData =>
   (element as any)[DOM_DATA_KEY];
 
 const setElementData = (element: Element | ChildNode, data: RDDElementData) => {
+  data.props = Object.fromEntries(
+    Object.entries(data.props)
+      .map(([key, value]) => [componentKeyToDomKey(key), value])
+      .filter(([key]) => key)
+  );
+
   (element as any)[DOM_DATA_KEY] = data;
-  (element as Element).setAttribute?.("data-key", data.key);
+  (element as Element).setAttribute?.("data-key", data.key); // DEBUG
 };
 
 const propMap: { [key: string]: string } = {
@@ -46,7 +52,7 @@ const domKeyToComponentKey = (key: string) => {
     return reversePropMap[key];
   }
 
-  if (key.startsWith("_")) {
+  if (key.startsWith(KEY_SEPARATOR)) {
     return null;
   }
 
@@ -56,7 +62,7 @@ const domKeyToComponentKey = (key: string) => {
 const componentKeyToDomKey = (key: string) => {
   const ignoredKeys = ["key"];
 
-  if (ignoredKeys.includes(key) || key.startsWith("_")) {
+  if (ignoredKeys.includes(key) || key.startsWith(KEY_SEPARATOR)) {
     return null;
   }
 
@@ -70,10 +76,15 @@ const componentKeyToDomKey = (key: string) => {
 const updateChangedElementProps = (element: Element, props: RDDProps) => {
   const { props: oldProps } = getElementData(element);
 
+  console.log({ props, oldProps });
+
   for (const key in oldProps) {
     const mappedKey = domKeyToComponentKey(key);
 
-    if (Object.is(props[mappedKey], undefined) || props[mappedKey] === null) {
+    if (
+      mappedKey !== null &&
+      (Object.is(props[mappedKey], undefined) || props[mappedKey] === null)
+    ) {
       console.log("Removing attribute: ", key);
       element.removeAttribute(key);
     }
@@ -120,7 +131,7 @@ let debugIndex = 1;
 const runChildren = (
   element: Element,
   children: RDDChild[],
-  childNodes?: ChildNode[],
+  allChildNodes?: ChildNode[],
   namespace: string = ""
 ) => {
   if (namespace.length && !namespace.startsWith(KEY_SEPARATOR)) {
@@ -132,8 +143,8 @@ const runChildren = (
   console.log("START: ", debug);
   console.log({ namespace });
 
-  if (!childNodes) {
-    childNodes = Array.from(element.childNodes);
+  if (!allChildNodes) {
+    allChildNodes = Array.from(element.childNodes);
   }
 
   if (!children.length) {
@@ -144,9 +155,13 @@ const runChildren = (
     namespace.match(SEPARATOR_COUNT_REGEXP) || []
   ).length;
 
-  console.log(childNodes.map((child) => getElementData(child).key));
+  const initialChildKeys = allChildNodes.map(
+    (child) => getElementData(child).key
+  );
 
-  childNodes = childNodes.filter((childNode) => {
+  console.log("ALL CHILD NODES: ", initialChildKeys);
+
+  const directChildNodes = allChildNodes.filter((childNode) => {
     const { key } = getElementData(childNode);
     const sameDepth =
       (key.match(SEPARATOR_COUNT_REGEXP) || []).length - 1 ===
@@ -156,7 +171,7 @@ const runChildren = (
 
   const childNodeMap: { [key: string]: ChildNode } = {};
 
-  childNodes.forEach((childNode) => {
+  directChildNodes.forEach((childNode) => {
     const { key } = getElementData(childNode);
     childNodeMap[key] = childNode;
   });
@@ -167,6 +182,8 @@ const runChildren = (
 
   const foundNodes: ChildNode[] = [];
 
+  const foundKeys: string[] = [];
+
   for (let index = 0; index < (children as RDDChild[]).length; index++) {
     const child = (children as RDDChild[])[index];
 
@@ -174,6 +191,11 @@ const runChildren = (
       typeof child === "string" || !child.key
         ? generateKey(index, namespace)
         : generateKey(child.key, namespace);
+
+    foundKeys.push(key);
+
+    // TODO: If key suddenly became parent of elements which did not have a parent
+    // Delete all children here
 
     console.log("LOOKING FOR KEY: ", key, " AMONG ", childNodeKeys);
 
@@ -226,10 +248,13 @@ const runChildren = (
     }
   }
 
-  console.log("FOUND NODES: ", foundNodes.length);
-  console.log("CHILD NODES: ", childNodes.length);
+  // TODO: if there are deeper keys within namespace which do not have parent among foundKeys
+  // Delete them
 
-  for (const childNode of childNodes) {
+  console.log("FOUND NODES: ", foundNodes.length);
+  console.log("DIRECT CHILD NODES: ", directChildNodes.length);
+
+  for (const childNode of directChildNodes) {
     if (!foundNodes.includes(childNode)) {
       childNode.remove();
     }
@@ -237,6 +262,9 @@ const runChildren = (
 
   console.log("END: ", debug);
 };
+
+// FIXME: need to somehow remove branches which are no longer there
+// For example if ID jumps over a namespace, element which used to be there needs to be deleted
 
 export const createElement = (
   component: RDDAnyComponent,
@@ -317,7 +345,7 @@ export const createElement = (
         }
 
         console.log("RUNNING CHILDREN");
-        runChildren(element, children, childNodes);
+        runChildren(element, children, childNodes, key);
       }
     },
   };
