@@ -11,6 +11,7 @@ export const createRoot = (container: Element) => ({
   // TODO: implement unmounting
 });
 
+// TODO: need better hashing to avoid one element pretending to be another one
 const generateKey = (index: number | string, namespace: string = "") =>
   `${namespace}${KEY_SEPARATOR}${index}`;
 
@@ -52,7 +53,7 @@ const domKeyToComponentKey = (key: string) => {
     return reversePropMap[key];
   }
 
-  if (key.startsWith(KEY_SEPARATOR)) {
+  if (key.startsWith("_")) {
     return null;
   }
 
@@ -62,7 +63,7 @@ const domKeyToComponentKey = (key: string) => {
 const componentKeyToDomKey = (key: string) => {
   const ignoredKeys = ["key"];
 
-  if (ignoredKeys.includes(key) || key.startsWith(KEY_SEPARATOR)) {
+  if (ignoredKeys.includes(key) || key.startsWith("_")) {
     return null;
   }
 
@@ -155,19 +156,45 @@ const runChildren = (
     namespace.match(SEPARATOR_COUNT_REGEXP) || []
   ).length;
 
+  // TODO: test if this is used below
   const initialChildKeys = allChildNodes.map(
     (child) => getElementData(child).key
   );
 
   console.log("ALL CHILD NODES: ", initialChildKeys);
 
-  const directChildNodes = allChildNodes.filter((childNode) => {
+  // const namespaceChildNodes = allChildNodes.filter((childNode) => {
+  //   const { key } = getElementData(childNode);
+  //   return key.startsWith(namespace);
+  // });
+
+  const deeperChildNodes: ChildNode[] = [];
+  const directChildNodes: ChildNode[] = [];
+
+  allChildNodes.forEach((childNode) => {
     const { key } = getElementData(childNode);
-    const sameDepth =
-      (key.match(SEPARATOR_COUNT_REGEXP) || []).length - 1 ===
-      namespaceSeparatorCount;
-    return key.startsWith(namespace) && sameDepth;
+
+    const keySeparatorCount =
+      (key.match(SEPARATOR_COUNT_REGEXP) || []).length - 1;
+
+    if (keySeparatorCount > namespaceSeparatorCount) {
+      deeperChildNodes.push(childNode);
+    } else if (keySeparatorCount === namespaceSeparatorCount) {
+      directChildNodes.push(childNode);
+    }
+
+    //   const sameDepth =
+    //     (key.match(SEPARATOR_COUNT_REGEXP) || []).length - 1 ===
+    //     namespaceSeparatorCount;
   });
+
+  // const directChildNodes = namespaceChildNodes.filter((childNode) => {
+  //   const { key } = getElementData(childNode);
+  //   const sameDepth =
+  //     (key.match(SEPARATOR_COUNT_REGEXP) || []).length - 1 ===
+  //     namespaceSeparatorCount;
+  //   return sameDepth;
+  // });
 
   const childNodeMap: { [key: string]: ChildNode } = {};
 
@@ -176,16 +203,14 @@ const runChildren = (
     childNodeMap[key] = childNode;
   });
 
-  const childNodeKeys = Object.keys(childNodeMap);
-
-  // FIXME: remove elements which are no longer passed
+  const directChildNodeKeys = Object.keys(childNodeMap);
 
   const foundNodes: ChildNode[] = [];
-
   const foundKeys: string[] = [];
 
   for (let index = 0; index < (children as RDDChild[]).length; index++) {
     const child = (children as RDDChild[])[index];
+    const isComponent = (child as RDDElementRenderInfo)?.isComponent ?? false;
 
     const key =
       typeof child === "string" || !child.key
@@ -194,14 +219,20 @@ const runChildren = (
 
     foundKeys.push(key);
 
-    // TODO: If key suddenly became parent of elements which did not have a parent
-    // Delete all children here
+    if (!directChildNodeKeys.includes(key) && !isComponent) {
+      allChildNodes.forEach((childNode) => {
+        const { key: childKey } = getElementData(childNode);
 
-    console.log("LOOKING FOR KEY: ", key, " AMONG ", childNodeKeys);
+        if (childKey.startsWith(key)) {
+          console.log(`EMPTY ${key} REPLACED WITH DOM. REMOVING: `, childKey);
+          childNode.remove();
+        }
+      });
+    }
 
-    const isComponent = (child as RDDElementRenderInfo)?.isComponent ?? false;
+    console.log("LOOKING FOR KEY: ", key, " AMONG ", directChildNodeKeys);
 
-    if (childNodeKeys[index] === key && !isComponent) {
+    if (directChildNodeKeys[index] === key && !isComponent) {
       console.log("FOUND IN GOOD PLACE");
       foundNodes.push(childNodeMap[key]);
 
@@ -218,10 +249,10 @@ const runChildren = (
 
       element.insertBefore(
         childNodeMap[key],
-        childNodeMap[childNodeKeys[index]]
+        childNodeMap[directChildNodeKeys[index]]
       );
 
-      childNodeKeys.splice(index, 0, key);
+      directChildNodeKeys.splice(index, 0, key);
 
       if (typeof child === "string") {
         if (childNodeMap[key].textContent !== child) {
@@ -235,21 +266,39 @@ const runChildren = (
       if (typeof child === "string") {
         const text = document.createTextNode(child);
 
-        if (childNodeMap[childNodeKeys[index]]) {
-          element.insertBefore(text, childNodeMap[childNodeKeys[index]]);
+        if (childNodeMap[directChildNodeKeys[index]]) {
+          element.insertBefore(text, childNodeMap[directChildNodeKeys[index]]);
         } else {
           element.appendChild(text);
         }
 
         setElementData(text, { key, props: {} });
       } else {
-        child.render(element, null, key, childNodeMap[childNodeKeys[index]]);
+        child.render(
+          element,
+          null,
+          key,
+          childNodeMap[directChildNodeKeys[index]]
+        );
       }
     }
   }
 
-  // TODO: if there are deeper keys within namespace which do not have parent among foundKeys
+  // TODO: if there are deeper keys within current namespace which do not have parent among foundKeys
   // Delete them
+
+  deeperChildNodes.forEach((childNode) => {
+    const { key: childKey } = getElementData(childNode);
+    if (
+      !foundKeys.find(
+        (foundKey) =>
+          childKey.length > foundKey.length && childKey.startsWith(foundKey)
+      )
+    ) {
+      console.log(`REMOVING ${childKey} - NO PARENT AMONG: `, foundKeys);
+      childNode.remove();
+    }
+  });
 
   console.log("FOUND NODES: ", foundNodes.length);
   console.log("DIRECT CHILD NODES: ", directChildNodes.length);

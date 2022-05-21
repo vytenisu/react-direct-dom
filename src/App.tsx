@@ -3,12 +3,35 @@ import * as React from "./react-direct-dom";
 // export const App = () => <div id="wrapper">Hello</div>;
 
 export const App = () => (
-  <>
-    <div>A</div>
-  </>
+  <div>
+    <>
+      <div>A</div>
+    </>
+    <>
+      <div>B</div>
+    </>
+    <>
+      <>
+        <>
+          <>Labas</>
+        </>
+      </>
+    </>
+  </div>
 );
 
-export const App2 = () => <div>B</div>;
+export const App2 = () => (
+  <div>
+    <>
+      <>
+        <>
+          <>Labas</>
+        </>
+      </>
+    </>
+    <div>C</div>
+  </div>
+);
 
 // export const App = () => (
 //   <div id="wrapper">
