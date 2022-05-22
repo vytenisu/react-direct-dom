@@ -1,43 +1,83 @@
 const KEY_SEPARATOR = "`";
 const SEPARATOR_COUNT_REGEXP = new RegExp(KEY_SEPARATOR, "g");
 
+let nextPropsCache: {
+  [key: string]: {
+    props: RDDProps;
+    component: any;
+  };
+} = {};
+
+let propsCache: {
+  [key: string]: {
+    props: RDDProps;
+    component: any;
+  };
+} = {};
+
 export const Fragment: RDDComponent = ({ children }) => children;
+
+// Not resource hungry
+const hash = (data: string) => {
+  var hash = 0,
+    i,
+    chr;
+
+  if (data.length === 0) return "";
+
+  for (i = 0; i < data.length; i++) {
+    chr = data.charCodeAt(i);
+    hash = (hash << 5) - hash + chr;
+    hash |= 0; // Convert to 32bit integer
+  }
+
+  return hash.toString(); //.substring(1, 5);
+};
 
 export const createRoot = (container: Element) => ({
   render: (children: any) => {
-    // render: (children: RDDChild | RDDChild[]) => {
-    createElement(Fragment, {}, children).render(container, null, "root");
+    return new Promise((resolve) => {
+      // render: (children: RDDChild | RDDChild[]) => {
+      createElement(Fragment, {}, children).render(
+        container,
+        null,
+        "root",
+        undefined,
+        true
+      );
+
+      propsCache = nextPropsCache;
+      nextPropsCache = {};
+
+      // FIXME: resource hungry
+      requestAnimationFrame(resolve);
+    });
   },
   // TODO: implement unmounting
 });
 
-// TODO: need better hashing to avoid one element pretending to be another one
-const generateKey = (index: number | string, namespace: string = "") =>
-  `${namespace}${KEY_SEPARATOR}${index}`;
+const generateKey = (
+  index: number | string,
+  namespace: string = "",
+  hash: string = ""
+) => `${namespace}${KEY_SEPARATOR}${index}#${hash}`;
 
-const DOM_DATA_KEY = "_reactDirectDom";
+const DATA_KEY = "_reactDirectDom";
 
 export interface RDDProps {
   [key: string]: any;
 }
 
 export interface RDDElementData {
-  props: { [key: string]: any };
   key: string;
 }
 
 const getElementData = (element: Element | ChildNode): RDDElementData =>
-  (element as any)[DOM_DATA_KEY];
+  (element as any)[DATA_KEY];
 
 const setElementData = (element: Element | ChildNode, data: RDDElementData) => {
-  data.props = Object.fromEntries(
-    Object.entries(data.props)
-      .map(([key, value]) => [componentKeyToDomKey(key), value])
-      .filter(([key]) => key)
-  );
-
-  (element as any)[DOM_DATA_KEY] = data;
-  (element as Element).setAttribute?.("data-key", data.key); // DEBUG
+  (element as any)[DATA_KEY] = data;
+  // (element as Element).setAttribute?.("data-key", data.key); // TODO: DEBUG-ONLY CODE
 };
 
 const propMap: { [key: string]: string } = {
@@ -74,8 +114,32 @@ const componentKeyToDomKey = (key: string) => {
   return key;
 };
 
+const propsChanged = (oldProps: RDDProps, props: RDDProps) => {
+  const oldKeys = Object.keys(oldProps);
+  const newKeys = Object.keys(props);
+
+  if (oldKeys.length !== newKeys.length) {
+    return true;
+  }
+
+  for (const key of oldKeys) {
+    if (!key.startsWith("_") && oldProps[key] !== props[key]) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+// FIXME: Resource hungry
 const updateChangedElementProps = (element: Element, props: RDDProps) => {
-  const { props: oldProps } = getElementData(element);
+  const keys = element.getAttributeNames?.() ?? [];
+
+  const oldProps: RDDProps = {};
+
+  for (const key of keys) {
+    oldProps[key] = element.getAttribute(key);
+  }
 
   for (const key in oldProps) {
     const mappedKey = domKeyToComponentKey(key);
@@ -99,20 +163,18 @@ const updateChangedElementProps = (element: Element, props: RDDProps) => {
       }
     }
   }
-
-  const data = getElementData(element);
-  data.props = props;
-  setElementData(element, data);
 };
 
 export interface RDDElementRenderInfo {
+  hash: string;
   key: string | null;
   isComponent: boolean;
   render: (
     parentElement: Element,
     element: Element | null,
     key: string,
-    insertBefore?: ChildNode
+    insertBefore?: ChildNode,
+    forceRender?: boolean
   ) => void;
 }
 
@@ -121,8 +183,6 @@ export type RDDComponent = (props: RDDProps) => RDDChild | RDDChild[];
 export type RDDAnyComponent = RDDComponent | string;
 
 export type RDDChild = RDDElementRenderInfo | string;
-
-// TODO: add hooks
 
 const runChildren = (
   element: Element,
@@ -182,7 +242,11 @@ const runChildren = (
 
     const key =
       typeof child === "string" || !child.key
-        ? generateKey(index, namespace)
+        ? generateKey(
+            index,
+            namespace,
+            typeof child === "string" ? "" : child.hash
+          )
         : generateKey(child.key, namespace);
 
     foundKeys.push(key);
@@ -234,7 +298,7 @@ const runChildren = (
           element.appendChild(text);
         }
 
-        setElementData(text, { key, props: {} });
+        setElementData(text, { key });
       } else {
         child.render(
           element,
@@ -276,15 +340,45 @@ export const createElement = (
     );
   }
 
+  const isComponent = typeof component === "function";
+
   return {
+    hash: props?.key
+      ? ""
+      : hash(
+          isComponent
+            ? ""
+            : component +
+                Object.keys(props ?? {}).join(",") +
+                "#" +
+                props.__source.fileName +
+                "#" +
+                props.__source.lineNumber +
+                "#" +
+                props.__source.columnNumber
+        ),
     key: props?.key ? "_" + props.key : null,
-    isComponent: typeof component === "function",
+    isComponent,
     render: (
       parentElement: Element,
       element: Element | null,
       key: string,
-      insertBefore?: ChildNode
+      insertBefore?: ChildNode,
+      forceRender = false
     ) => {
+      if (propsCache[key] && !forceRender) {
+        const { props: oldProps, component: oldComponent } = propsCache[key];
+
+        if (
+          component === oldComponent &&
+          !propsChanged(oldProps, props || {})
+        ) {
+          return;
+        }
+      }
+
+      nextPropsCache[key] = { props: props || {}, component };
+
       if (typeof component === "function") {
         const content = component({ ...props, children });
 
@@ -301,8 +395,6 @@ export const createElement = (
           );
         }
       } else if (typeof component === "string") {
-        // TODO: if props are same - avoid rendering
-
         let childNodes: ChildNode[] = [];
 
         if (element) {
@@ -323,7 +415,7 @@ export const createElement = (
             }
           }
 
-          setElementData(element, { props, key });
+          setElementData(element, { key });
 
           if (insertBefore) {
             parentElement.insertBefore(element, insertBefore);
